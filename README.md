@@ -41,6 +41,3 @@ pip install \
   pyzipper>=0.3.6 \
   transformers>=4.28.0 \
   torchvision>=0.14.0
-
-
-  python3 model_test_generator.py
