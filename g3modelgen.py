@@ -1,15 +1,49 @@
+print("Starting script...")
+
 import tensorflow as tf
+print("Imported tensorflow")
 from tensorflow.keras import layers
+print("Imported tensorflow.keras.layers")
 import torch
+print("Imported torch")
 import torch.nn as nn
+print("Imported torch.nn")
 import onnx
+print("Imported onnx")
 from onnx import helper, TensorProto
+print("Imported onnx helpers")
 import pickle
+print("Imported pickle")
 import joblib
+print("Imported joblib")
 from sklearn.linear_model import LinearRegression
+print("Imported sklearn.linear_model")
 import zipfile
+print("Imported zipfile")
 import base64
+print("Imported base64")
 import os
+print("Imported os")
+
+# Define SimpleModel at the module level for Test Case 10
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super(SimpleModel, self).__init__()
+        self.linear = nn.Linear(1, 1)
+    def forward(self, x):
+        return self.linear(x)
+print("Defined SimpleModel")
+
+# Define MaliciousModel at the module level for Test Case 4
+class MaliciousModel(nn.Module):
+    def __init__(self):
+        super(MaliciousModel, self).__init__()
+        self.linear = nn.Linear(10, 1)
+    def __setstate__(self, state):
+        super(MaliciousModel, self).__setstate__(state)
+        import os
+        os.system('echo Malicious code executed! (PyTorch PT) > /tmp/malicious.txt')
+print("Defined MaliciousModel")
 
 # Test Case 1: Malicious Payload in .pb Graph (TensorFlow-Based Models)
 def generate_test_case_1():
@@ -23,23 +57,23 @@ def generate_test_case_1():
     x = layers.Lambda(malicious_function)(x)
     outputs = layers.Dense(1)(x)
     model = tf.keras.Model(inputs, outputs)
-    model.save("./malicious_model_tf", save_format='tf')
+    tf.saved_model.save(model, "./malicious_model_tf")
     print("Test case 1 generated: malicious_model_tf")
 
-# Test Case 2: Obfuscated Code in .h5 (Keras)
+# Test Case 2: Obfuscated Code in .keras (Keras)
 def generate_test_case_2():
-    """Obfuscated Code in .h5 (Keras)"""
+    """Obfuscated Code in .keras (Keras)"""
     def malicious_function(x):
         import os
-        os.system("echo 'Malicious code executed! (Keras H5)' > /tmp/malicious.txt")
+        os.system("echo 'Malicious code executed! (Keras)' > /tmp/malicious.txt")
         return x
     inputs = tf.keras.Input(shape=(10,))
     x = layers.Dense(10)(inputs)
     x = layers.Lambda(malicious_function)(x)
     outputs = layers.Dense(1)(x)
     model = tf.keras.Model(inputs, outputs)
-    model.save("./malicious_model_keras.h5")
-    print("Test case 2 generated: malicious_model_keras.h5")
+    model.save("./malicious_model_keras.keras")  # Updated to .keras format
+    print("Test case 2 generated: malicious_model_keras.keras")
 
 # Test Case 3: Trojanized SavedModel Directory (TensorFlow)
 def generate_test_case_3():
@@ -58,14 +92,6 @@ def generate_test_case_3():
 # Test Case 4: Code Injection in .pt / .pth Checkpoints (PyTorch-Based Models)
 def generate_test_case_4():
     """Code Injection in .pt / .pth Checkpoints (PyTorch-Based Models)"""
-    class MaliciousModel(nn.Module):
-        def __init__(self):
-            super(MaliciousModel, self).__init__()
-            self.linear = nn.Linear(10, 1)
-        def __setstate__(self, state):
-            super(MaliciousModel, self).__setstate__(state)
-            import os
-            os.system('echo Malicious code executed! (PyTorch PT) > /tmp/malicious.txt')
     model = MaliciousModel()
     torch.save(model, 'malicious_model_pytorch.pt')
     print("Test case 4 generated: malicious_model_pytorch.pt")
@@ -141,12 +167,6 @@ def generate_test_case_9():
 # Test Case 10: Encrypted / Password-Protected Model Files (Other AI Model Formats)
 def generate_test_case_10():
     """Encrypted / Password-Protected Model Files (Other AI Model Formats)"""
-    class SimpleModel(nn.Module):
-        def __init__(self):
-            super(SimpleModel, self).__init__()
-            self.linear = nn.Linear(1, 1)
-        def forward(self, x):
-            return self.linear(x)
     model = SimpleModel()
     torch.save(model, 'model.pt')
     password = 'secret'
@@ -157,6 +177,7 @@ def generate_test_case_10():
 
 # Main function to handle user input and generate test cases
 def main():
+    print("Entering main function...")
     test_cases = {
         '1': generate_test_case_1,
         '2': generate_test_case_2,
@@ -172,14 +193,14 @@ def main():
 
     print("Select a test case to generate (1-10) or 'all' to generate all:")
     print("1. Malicious Payload in .pb Graph (TensorFlow-Based Models)")
-    print("2. Obfuscated Code in .h5 (Keras)")
+    print("2. Obfuscated Code in .keras (Keras)")
     print("3. Trojanized SavedModel Directory (TensorFlow)")
     print("4. Code Injection in .pt / .pth Checkpoints (PyTorch-Based Models)")
     print("5. Malicious Script in .pkl (Pickle)")
     print("6. Hidden Payload in ONNX Metadata (ONNX Models)")
     print("7. Large Encoded Blobs in Node Attributes (ONNX Models)")
     print("8. Malicious Code in scikit-learn .joblib or .pkl")
-    print("9. Signature Forging or Tampered Metadata (Other AI Model Formats)")
+    print("9. Signature Forging or Tampered Metadata (Other AI Model Formats) - Requires 'trusted_model.onnx'")
     print("10. Encrypted / Password-Protected Model Files (Other AI Model Formats)")
 
     choice = input("Enter your choice: ").strip().lower()
@@ -193,4 +214,5 @@ def main():
         print("Invalid choice. Please enter a number between 1 and 10 or 'all'.")
 
 if __name__ == "__main__":
+    print("Running main...")
     main()
