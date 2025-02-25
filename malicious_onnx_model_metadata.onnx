@@ -1,14 +1,0 @@
-
-:Z
-
-inputoutput"Identity
-test_modelZ
-input
-
-
-b
-output
-
-
-BrT
-hidden_payloadBecho Malicious code executed! (ONNX Metadata) > /tmp/malicious.txt
