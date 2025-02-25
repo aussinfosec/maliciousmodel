@@ -153,7 +153,12 @@ def generate_test_case_7():
     node = helper.make_node('Identity', ['input'], ['output'])
     graph = helper.make_graph([node], 'test_model', [input], [output])
     model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
-    malicious_code = 'echo "Malicious code executed! (ONNX Node Attributes)" > /tmp/malicious.txt && echo "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*" > /tmp/eicar.com'
+    malicious_code = (
+        'import os\n'
+        'os.system(\'echo "Malicious code executed! (ONNX Node Attributes)" > /tmp/malicious.txt\')\n'
+        'with open("/tmp/eicar.com", "w") as f:\n'
+        '    f.write("X5O!P%@AP[4\\\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*")'
+    )
     encoded_malicious_code = base64.b64encode(malicious_code.encode()).decode()
     model.metadata_props.add(key="malicious_attr", value=encoded_malicious_code)
     onnx.save(model, 'malicious_onnx_model_node_attributes.onnx')

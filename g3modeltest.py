@@ -134,7 +134,7 @@ def validate_test_case_7():
         for prop in model.metadata_props:
             if prop.key == 'malicious_attr':
                 decoded_code = base64.b64decode(prop.value).decode()
-                subprocess.run(['bash', '-c', decoded_code], check=True)
+                subprocess.run(['python', '-c', decoded_code], check=True)
                 break
         check_file_exists('/tmp/malicious.txt', 'Malicious code executed! (ONNX Node Attributes)')
         check_file_exists('/tmp/eicar.com', 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*')
